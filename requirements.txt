@@ -1,0 +1,7 @@
+# requirements.txt
+streamlit
+google-genai
+langchain-community
+langchain-google-genai
+pypdf
+chromadb
