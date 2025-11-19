@@ -3,7 +3,7 @@ import os
 import streamlit as st
 from google import genai
 from google.genai import types
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from dotenv import load_dotenv # Util para pruebas locales, aunque Streamlit usa st.secrets
 
@@ -142,4 +142,5 @@ if prompt := st.chat_input("Escribe aquí tu pregunta o tarea..."):
     with st.chat_message("assistant"):
         st.markdown(response_text)
     
+
     st.session_state.messages.append({"role": "assistant", "content": response_text})
