@@ -32,11 +32,13 @@ if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
     with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(DB_PATH)
 
-# --- PERSONALIDAD ---
+# --- PERSONALIDAD BASE ---
+# La personalidad específica ahora se inyecta dinámicamente según el botón seleccionado
 SYSTEM_INSTRUCTION = """
-Eres "Genio", un tutor socrático y asistente resolutivo.
-1. MODO ENSEÑAR (Predeterminado): NUNCA dar la respuesta directa. Usa preguntas guía. Da pistas si es necesario. Imagina que el sujeto no tiene el conocimiento que tú si
-2. MODO RESOLVER (Guía Resolutivo): Dar la respuesta directa si se pide.
+Eres "Genio", un tutor inteligente y adaptable.
+Tu comportamiento cambiará según la instrucción de modo que recibas en cada mensaje.
+Siempre mantén un tono amable, paciente y educativo.
+Usa **negritas** para resaltar conceptos clave.
 """
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
@@ -90,7 +92,6 @@ def process_new_file(uploaded_file):
             )
         else:
             st.session_state.vector_db.add_documents(texts)
-            
         return True, len(texts)
     except Exception as e:
         return False, str(e)
@@ -105,15 +106,48 @@ def get_rag_sources():
         return list(unique)
     except: return []
 
-def generate_response(prompt):
+# --- LÓGICA DE RESPUESTA INTELIGENTE ---
+def generate_response(prompt, mode):
     contexto_rag = ""
-    if st.session_state.vector_db:
+    instruccion_modo = ""
+    usar_rag = True
+
+    # 1. Configurar el MODO
+    if mode == "Enseñar (Socrático)":
+        instruccion_modo = "ACTÚA EN MODO ENSEÑAR: NO des la respuesta directa. Usa el método socrático, haz preguntas guía y da pistas para que el usuario aprenda."
+    elif mode == "Resolver (Directo)":
+        instruccion_modo = "ACTÚA EN MODO RESOLVER: Da la respuesta directa, clara y concisa. Explica paso a paso si es necesario."
+    elif mode == "Conocimiento General":
+        instruccion_modo = "ACTÚA COMO ASISTENTE GENERAL: Responde usando tu conocimiento general de IA. NO uses el contexto de los documentos a menos que sea indispensable."
+        usar_rag = False # Desactivamos la búsqueda en documentos
+
+    # 2. Búsqueda RAG (Solo si no es modo general)
+    if usar_rag and st.session_state.vector_db:
         try:
             docs = st.session_state.vector_db.similarity_search(prompt, k=3)
             contexto_rag = "\n\n".join([doc.page_content for doc in docs])
         except: pass
     
-    prompt_ctx = f"[CONTEXTO RAG]: {contexto_rag}\n[PREGUNTA]: {prompt}"
+    # 3. Construcción del Prompt Final
+    if usar_rag:
+        prompt_ctx = f"""
+        {instruccion_modo}
+        
+        Usa el siguiente CONTEXTO DE LOS DOCUMENTOS para responder (si es relevante):
+        ---
+        {contexto_rag}
+        ---
+        
+        PREGUNTA DEL USUARIO: {prompt}
+        """
+    else:
+        # Prompt limpio para conocimiento general
+        prompt_ctx = f"""
+        {instruccion_modo}
+        
+        PREGUNTA DEL USUARIO: {prompt}
+        """
+
     try:
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
@@ -123,7 +157,19 @@ def generate_response(prompt):
 # --- INTERFAZ ---
 st.set_page_config(page_title="Genio Tutor", page_icon="🦉", layout="wide")
 
+# --- BARRA LATERAL (CONTROLES) ---
 with st.sidebar:
+    st.header("🎛️ Configuración")
+    
+    # SELECTOR DE MODO
+    modo_seleccionado = st.radio(
+        "Elige tu modo de estudio:",
+        ["Enseñar (Socrático)", "Resolver (Directo)", "Conocimiento General"],
+        captions=["Te guía sin dar respuestas.", "Te da la solución directa.", "Usa internet/IA (sin tus PDFs)."]
+    )
+    
+    st.divider()
+    
     st.header("📂 Biblioteca")
     st.subheader("Subir nuevo conocimiento")
     uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
@@ -137,16 +183,21 @@ with st.sidebar:
                         st.toast(f"✅ {up_file.name} aprendido", icon="🧠")
                     else:
                         st.error(f"Error: {info}")
+    
     st.divider()
     if st.session_state.vector_db:
-        st.success(f"✅ Memoria Activa")
-        for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
-    else: st.error("❌ RAG Inactivo")
+        st.success(f"✅ Memoria RAG Activa")
+        with st.expander("Ver libros indexados"):
+            for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
+    else:
+        st.warning("⚠️ RAG Inactivo (No hay PDFs)")
 
+# --- ÁREA PRINCIPAL ---
 st.title("🦉 Genio: Tu Super Tutor")
 
+# Mensaje de bienvenida dinámico según el modo
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Estoy listo para estudiar contigo. 📚"}]
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Configura mi modo en la izquierda y empecemos. 📚"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -157,10 +208,10 @@ if prompt := st.chat_input("Escribe tu pregunta..."):
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.spinner('Pensando...'):
-        response_text = generate_response(prompt)
+        # Pasamos el modo seleccionado a la función de respuesta
+        response_text = generate_response(prompt, modo_seleccionado)
     
     with st.chat_message("assistant"):
         st.markdown(response_text)
     
-    # Guardamos solo texto
     st.session_state.messages.append({"role": "assistant", "content": response_text})
