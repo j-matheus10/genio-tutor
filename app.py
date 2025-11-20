@@ -23,7 +23,7 @@ ZIP_PATH = "genio_db_knowledge.zip"
 PDF_FOLDER = "pdfs"             
 EMBEDDING_MODEL_NAME = "text-embedding-004"
 
-# Asegurar que exista la carpeta de PDFs (necesaria para procesar cargas)
+# Asegurar que exista la carpeta de PDFs
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
 # --- DESCOMPRESIÓN AUTOMÁTICA ---
@@ -35,7 +35,7 @@ if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
 # --- PERSONALIDAD ---
 SYSTEM_INSTRUCTION = """
 Eres "Genio", un tutor socrático y asistente resolutivo.
-1. MODO ENSEÑAR (Predeterminado): NUNCA dar la respuesta directa. Usa preguntas guía.
+1. MODO ENSEÑAR (Predeterminado): NUNCA dar la respuesta directa. Usa preguntas guía. Da pistas si es necesario. Imagina que el sujeto no tiene el conocimiento que tú si
 2. MODO RESOLVER (Guía Resolutivo): Dar la respuesta directa si se pide.
 """
 chat_config = types.GenerateContentConfig(
@@ -75,7 +75,6 @@ if 'vector_db' not in st.session_state:
 # --- FUNCIONES DE APRENDIZAJE EN VIVO ---
 def process_new_file(uploaded_file):
     try:
-        # Guardamos el archivo temporalmente para poder leerlo
         file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
@@ -163,6 +162,5 @@ if prompt := st.chat_input("Escribe tu pregunta..."):
     with st.chat_message("assistant"):
         st.markdown(response_text)
     
+    # Guardamos solo texto
     st.session_state.messages.append({"role": "assistant", "content": response_text})
-    st.session_state.messages.append(msg_data)
-
