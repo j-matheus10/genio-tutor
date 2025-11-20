@@ -1,35 +1,45 @@
 # app.py
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 import os
 import streamlit as st
+import fitz  # PyMuPDF
+import io
+import zipfile
+from PIL import Image
 from google import genai
 from google.genai import types
+
+# --- IMPORTS NUEVOS PARA EL APRENDIZAJE EN VIVO ---
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings 
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# --- CONFIGURACIÓN DE VARIABLES GLOBALES ---
+# --- CONFIGURACIÓN ---
 MODELO = "gemini-2.5-flash" 
-DB_PATH = "genio_db_knowledge" 
-EMBEDDING_MODEL_NAME = "text-embedding-004" 
+DB_PATH = "genio_db_knowledge"  
+ZIP_PATH = "genio_db_knowledge.zip"
+PDF_FOLDER = "pdfs"             
+EMBEDDING_MODEL_NAME = "text-embedding-004"
 
-# --- PERSONALIDAD DEL TUTOR ---
+# Asegurar que exista la carpeta de PDFs para guardar los temporales
+os.makedirs(PDF_FOLDER, exist_ok=True)
+
+# --- DESCOMPRESIÓN AUTOMÁTICA (INICIAL) ---
+if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
+    print("📦 ZIP detectado. Descomprimiendo...")
+    with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+        zip_ref.extractall(DB_PATH)
+
+# --- PERSONALIDAD ---
 SYSTEM_INSTRUCTION = """
-Eres "Genio", un tutor socrático y asistente resolutivo. Tu objetivo es alternar entre dos modos, según lo solicite el usuario.
-
---- REGLAS DE MODO ---
-1. MODO ENSEÑAR (Predeterminado):
-   - Objetivo: Fomentar el aprendizaje y la autonomía.
-   - Regla de Oro: NUNCA dar la respuesta directa. Usar preguntas guía y el método socrático.
-
-2. MODO RESOLVER (Guía Resolutivo):
-   - Objetivo: Proveer la solución clara o un resumen de hechos.
-   - Activación: Si el usuario dice 'Modo: Resolver', 'Dame la respuesta', o 'Resuélvelo'.
-   - Regla de Oro: Ofrecer la respuesta directa, clara y paso a paso.
-
---- REGLAS GLOBALES ---
-- Usa **negritas** para destacar las palabras clave.
-- Utiliza el CONTEXTO RAG provisto para responder o guiar.
+Eres "Genio", un tutor socrático y asistente resolutivo.
+1. MODO ENSEÑAR (Predeterminado): NUNCA dar la respuesta directa.
+2. MODO RESOLVER (Guía Resolutivo): Dar la respuesta directa si se pide.
 """
-
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
     temperature=0.7,
@@ -37,133 +47,165 @@ chat_config = types.GenerateContentConfig(
 )
 
 # --- INICIALIZACIÓN ---
-
 @st.cache_resource
 def initialize_gemini():
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
     except KeyError:
-        st.error("❌ ERROR: La clave GEMINI_API_KEY no se encontró en st.secrets.")
+        st.error("❌ Faltan secrets.")
         st.stop()
-        
     client = genai.Client(api_key=api_key)
-    
     embedding_function = GoogleGenerativeAIEmbeddings(
-        model=EMBEDDING_MODEL_NAME, 
-        google_api_key=api_key
+        model=EMBEDDING_MODEL_NAME, google_api_key=api_key
     )
     return client, embedding_function
 
 client, embedding_function = initialize_gemini()
 
-@st.cache_resource 
+# Cargamos la DB sin caché estricta para permitir actualizaciones en vivo
 def load_rag_database(): 
     global embedding_function 
     try:
         if os.path.exists(DB_PATH) and os.listdir(DB_PATH):
-            db = Chroma(persist_directory=DB_PATH, 
-                        embedding_function=embedding_function)
-            return db
-        else:
-            return None
-    except Exception as e:
+            return Chroma(persist_directory=DB_PATH, embedding_function=embedding_function)
+        return None
+    except Exception:
         return None
 
-vector_db = load_rag_database()
+# Usamos session_state para mantener la DB activa en memoria durante la sesión
+if 'vector_db' not in st.session_state:
+    st.session_state.vector_db = load_rag_database()
 
-# --- NUEVA FUNCIÓN: Obtener lista de archivos ---
+# --- FUNCIONES DE APRENDIZAJE EN VIVO ---
+def process_new_file(uploaded_file):
+    """Guarda, procesa e indexa un nuevo archivo PDF en vivo."""
+    try:
+        # 1. Guardar el archivo físicamente (necesario para PyPDFLoader y Visuales)
+        file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+            
+        # 2. Cargar y Fragmentar
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        texts = text_splitter.split_documents(documents)
+        
+        # 3. Añadir a la Base de Datos Activa
+        if st.session_state.vector_db is None:
+            # Si no había DB, creamos una nueva
+            st.session_state.vector_db = Chroma.from_documents(
+                texts, embedding_function, persist_directory=DB_PATH
+            )
+        else:
+            # Si ya existía, añadimos los documentos
+            st.session_state.vector_db.add_documents(texts)
+            
+        return True, len(texts)
+    except Exception as e:
+        return False, str(e)
+
+# --- FUNCIONES EXTRA ---
 def get_rag_sources():
-    if not vector_db:
-        return []
+    if not st.session_state.vector_db: return []
     try:
-        # Obtenemos los metadatos de todos los documentos
-        data = vector_db.get()
+        data = st.session_state.vector_db.get()
         metadatas = data.get('metadatas', [])
-        
-        # Extraemos los nombres de archivo únicos ('source')
-        unique_sources = set()
-        for m in metadatas:
-            if m and 'source' in m:
-                # Solo guardamos el nombre del archivo, no la ruta completa
-                unique_sources.add(os.path.basename(m['source']))
-        
-        return list(unique_sources)
-    except Exception as e:
-        return []
+        unique = set([os.path.basename(m['source']) for m in metadatas if m and 'source' in m])
+        return list(unique)
+    except: return []
 
-# Inicializar Chat
-if 'chat_session' not in st.session_state:
-    st.session_state.chat_session = client.chats.create(
-        model=MODELO,
-        config=chat_config
-    )
-
-# --- LÓGICA DE RESPUESTA ---
-def generate_response(prompt):
-    contexto_rag = ""
-    if vector_db:
-        try:
-            docs = vector_db.similarity_search(prompt, k=3)
-            contexto_rag = "\n\n".join([doc.page_content for doc in docs])
-        except Exception:
-            pass
-    
-    prompt_con_contexto = f"""
-    [CONTEXTO RAG]: {contexto_rag}
-    [PREGUNTA]: {prompt}
-    """
-    
+def render_pdf_page(filename, page_number):
     try:
-        response = st.session_state.chat_session.send_message(prompt_con_contexto)
-        return response.text
-    except Exception as e:
-        return f"⚠️ Error: {str(e)}"
+        clean_filename = os.path.basename(filename)
+        pdf_path = os.path.join(PDF_FOLDER, clean_filename)
+        if not os.path.exists(pdf_path): return None
+        doc = fitz.open(pdf_path)
+        if 0 <= page_number < len(doc):
+            page = doc.load_page(page_number)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) 
+            return Image.open(io.BytesIO(pix.tobytes("png")))
+    except: pass
+    return None
 
-# --- INTERFAZ STREAMLIT ---
+def generate_response_with_visuals(prompt):
+    contexto_rag = ""
+    sources_found = [] 
+    if st.session_state.vector_db:
+        try:
+            docs = st.session_state.vector_db.similarity_search(prompt, k=3)
+            contexto_rag = "\n\n".join([doc.page_content for doc in docs])
+            for doc in docs:
+                src = doc.metadata.get('source', '')
+                page = doc.metadata.get('page', 0)
+                if src: sources_found.append((src, page))
+        except: pass
+    
+    prompt_ctx = f"[CONTEXTO RAG]: {contexto_rag}\n[PREGUNTA]: {prompt}"
+    try:
+        if 'chat_session' not in st.session_state:
+            st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
+        return st.session_state.chat_session.send_message(prompt_ctx).text, sources_found
+    except Exception as e: return f"Error: {e}", []
 
+# --- INTERFAZ ---
 st.set_page_config(page_title="Genio Tutor", page_icon="🦉", layout="wide")
 
-# === BARRA LATERAL (SIDEBAR) CON ARCHIVOS ===
 with st.sidebar:
-    st.header("📂 Base de Conocimiento")
-    st.markdown("---")
-    if vector_db:
-        st.success("✅ Base de Datos Activa")
-        sources = get_rag_sources()
-        if sources:
-            st.markdown(f"**📚 {len(sources)} Documentos Indexados:**")
-            for source in sources:
-                st.markdown(f"- 📄 `{source}`")
-        else:
-            st.info("No se detectaron nombres de archivos en la metadata.")
-    else:
-        st.error("❌ RAG Inactivo")
-        st.markdown("El tutor está usando solo su conocimiento general.")
-        
-    st.markdown("---")
-    st.caption("v1.2 - Streamlit Cloud")
+    st.header("📂 Biblioteca")
+    
+    # --- SECCIÓN DE CARGA EN VIVO ---
+    st.subheader("Subir nuevo conocimiento")
+    uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
+    
+    if uploaded_files:
+        for up_file in uploaded_files:
+            # Evitar procesar el mismo archivo dos veces en la misma sesión visual
+            if up_file.name not in [os.path.basename(s) for s in get_rag_sources()]:
+                with st.spinner(f"Aprendiendo {up_file.name}..."):
+                    success, info = process_new_file(up_file)
+                    if success:
+                        st.toast(f"✅ {up_file.name} aprendido ({info} fragmentos)", icon="🧠")
+                    else:
+                        st.error(f"Error: {info}")
+    
+    st.divider()
+    
+    if st.session_state.vector_db:
+        st.success(f"✅ Memoria Activa")
+        for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
+    else: st.error("❌ RAG Inactivo")
 
-# === ÁREA PRINCIPAL ===
-st.title("🦉 Genio: Tu Super Tutor IA")
-st.markdown("¡Hola! Soy Genio. Pregúntame sobre tus documentos y aprenderemos juntos. 🧠")
+st.title("🦉 Genio: Tu Super Tutor Visual")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.messages.append({"role": "assistant", "content": "Hola, ¿qué quieres aprender hoy?"})
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Puedo leer tus PDFs al instante. Súbelos a la izquierda. 📸"}]
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if "images" in msg:
+            for img in msg["images"]: st.image(img['image'], caption=f"Fuente: {img['name']}", use_column_width=True)
 
-if prompt := st.chat_input("Tu pregunta..."):
+if prompt := st.chat_input("Escribe tu pregunta..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
-    with st.spinner('Consultando base de conocimientos...'):
-        response_text = generate_response(prompt)
+    with st.spinner('Buscando...'):
+        response_text, sources = generate_response_with_visuals(prompt)
     
+    images_to_save = []
     with st.chat_message("assistant"):
         st.markdown(response_text)
+        if sources:
+            seen = set()
+            unique = [x for x in sources if not (x in seen or seen.add(x))]
+            for src, page in unique:
+                img = render_pdf_page(src, page)
+                if img:
+                    st.image(img, caption=f"Pág {page+1} de {os.path.basename(src)}")
+                    images_to_save.append({'name': os.path.basename(src), 'page': page, 'image': img})
     
-    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    msg_data = {"role": "assistant", "content": response_text}
+    if images_to_save: msg_data["images"] = images_to_save
+    st.session_state.messages.append(msg_data)
