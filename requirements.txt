@@ -6,3 +6,4 @@ langchain-google-genai
 pypdf
 chromadb
 pymupdf
+pysqlite3-binary
