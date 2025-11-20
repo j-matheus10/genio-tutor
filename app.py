@@ -1,4 +1,5 @@
 # app.py
+# --- FIX PARA SQLITE EN STREAMLIT CLOUD ---
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -12,11 +13,12 @@ from PIL import Image
 from google import genai
 from google.genai import types
 
-# --- IMPORTS NUEVOS PARA EL APRENDIZAJE EN VIVO ---
+# --- IMPORTS DE LANGCHAIN ---
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings 
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+# IMPORTANTE: Usar la librería específica para evitar errores de módulo
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --- CONFIGURACIÓN ---
 MODELO = "gemini-2.5-flash" 
@@ -25,10 +27,10 @@ ZIP_PATH = "genio_db_knowledge.zip"
 PDF_FOLDER = "pdfs"             
 EMBEDDING_MODEL_NAME = "text-embedding-004"
 
-# Asegurar que exista la carpeta de PDFs para guardar los temporales
+# Asegurar que exista la carpeta de PDFs
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
-# --- DESCOMPRESIÓN AUTOMÁTICA (INICIAL) ---
+# --- DESCOMPRESIÓN AUTOMÁTICA ---
 if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
     print("📦 ZIP detectado. Descomprimiendo...")
     with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
@@ -62,7 +64,6 @@ def initialize_gemini():
 
 client, embedding_function = initialize_gemini()
 
-# Cargamos la DB sin caché estricta para permitir actualizaciones en vivo
 def load_rag_database(): 
     global embedding_function 
     try:
@@ -72,33 +73,26 @@ def load_rag_database():
     except Exception:
         return None
 
-# Usamos session_state para mantener la DB activa en memoria durante la sesión
 if 'vector_db' not in st.session_state:
     st.session_state.vector_db = load_rag_database()
 
 # --- FUNCIONES DE APRENDIZAJE EN VIVO ---
 def process_new_file(uploaded_file):
-    """Guarda, procesa e indexa un nuevo archivo PDF en vivo."""
     try:
-        # 1. Guardar el archivo físicamente (necesario para PyPDFLoader y Visuales)
         file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
             
-        # 2. Cargar y Fragmentar
         loader = PyPDFLoader(file_path)
         documents = loader.load()
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         texts = text_splitter.split_documents(documents)
         
-        # 3. Añadir a la Base de Datos Activa
         if st.session_state.vector_db is None:
-            # Si no había DB, creamos una nueva
             st.session_state.vector_db = Chroma.from_documents(
                 texts, embedding_function, persist_directory=DB_PATH
             )
         else:
-            # Si ya existía, añadimos los documentos
             st.session_state.vector_db.add_documents(texts)
             
         return True, len(texts)
@@ -153,24 +147,19 @@ st.set_page_config(page_title="Genio Tutor", page_icon="🦉", layout="wide")
 
 with st.sidebar:
     st.header("📂 Biblioteca")
-    
-    # --- SECCIÓN DE CARGA EN VIVO ---
     st.subheader("Subir nuevo conocimiento")
     uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
         for up_file in uploaded_files:
-            # Evitar procesar el mismo archivo dos veces en la misma sesión visual
             if up_file.name not in [os.path.basename(s) for s in get_rag_sources()]:
                 with st.spinner(f"Aprendiendo {up_file.name}..."):
                     success, info = process_new_file(up_file)
                     if success:
-                        st.toast(f"✅ {up_file.name} aprendido ({info} fragmentos)", icon="🧠")
+                        st.toast(f"✅ {up_file.name} aprendido", icon="🧠")
                     else:
                         st.error(f"Error: {info}")
-    
     st.divider()
-    
     if st.session_state.vector_db:
         st.success(f"✅ Memoria Activa")
         for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
@@ -179,7 +168,7 @@ with st.sidebar:
 st.title("🦉 Genio: Tu Super Tutor Visual")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Puedo leer tus PDFs al instante. Súbelos a la izquierda. 📸"}]
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Sube tus PDFs y pregúntame. 📸"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -207,5 +196,6 @@ if prompt := st.chat_input("Escribe tu pregunta..."):
                     images_to_save.append({'name': os.path.basename(src), 'page': page, 'image': img})
     
     msg_data = {"role": "assistant", "content": response_text}
-    if images_to_save: msg_data["images"] = images_to_save
+    if images_to_save:
+        msg_data["images"] = images_to_save # <--- Esta línea ya está corregida
     st.session_state.messages.append(msg_data)
