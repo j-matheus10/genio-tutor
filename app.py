@@ -155,7 +155,7 @@ def generate_response(prompt, mode):
     except Exception as e: return f"Error: {e}"
 
 # --- INTERFAZ ---
-st.set_page_config(page_title="Genio Tutor", page_icon="🦉", layout="wide")
+st.set_page_config(page_title="Tilines Inc.", page_icon="🦉", layout="wide")
 
 # --- BARRA LATERAL (CONTROLES) ---
 with st.sidebar:
@@ -193,11 +193,11 @@ with st.sidebar:
         st.warning("⚠️ RAG Inactivo (No hay PDFs)")
 
 # --- ÁREA PRINCIPAL ---
-st.title("🦉 Genio: Tu Super Tutor")
+st.title("🦉 Tilines Inc: IA para estudio")
 
 # Mensaje de bienvenida dinámico según el modo
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Configura mi modo en la izquierda y empecemos. 📚"}]
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Configura el modo en que quieres trabajar en la barra lateral izquierda y empecemos cuando estés listo!📚"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
