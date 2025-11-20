@@ -1,6 +1,7 @@
 # requirements.txt
 streamlit
 google-genai
+langchain
 langchain-community
 langchain-google-genai
 pypdf
