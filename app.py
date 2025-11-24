@@ -9,7 +9,7 @@ import streamlit as st
 import zipfile
 from google import genai
 from google.genai import types
-# --- NUEVO IMPORT DE SEGURIDAD ---
+# --- IMPORTS DE SEGURIDAD ---
 from google.genai.types import HarmCategory, HarmBlockThreshold
 
 # --- IMPORTS DE LANGCHAIN ---
@@ -18,7 +18,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# --- CONFIGURACIÓN DE PÁGINA (Debe ir al inicio) ---
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Tilines Inc.", page_icon="🦉", layout="wide")
 
 # --- CONFIGURACIÓN GENERAL ---
@@ -28,7 +28,6 @@ ZIP_PATH = "genio_db_knowledge.zip"
 PDF_FOLDER = "pdfs"             
 EMBEDDING_MODEL_NAME = "text-embedding-004"
 
-# Asegurar que exista la carpeta de PDFs
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
 # --- DESCOMPRESIÓN AUTOMÁTICA ---
@@ -37,10 +36,9 @@ if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
     with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(DB_PATH)
 
-# --- CONFIGURACIÓN DE SEGURIDAD Y PERSONALIDAD (FILTROS ÉTICOS) ---
+# --- CONFIGURACIÓN DE SEGURIDAD Y PERSONALIDAD ---
 
 # 1. Filtros de Seguridad Estrictos (Protección Infantil)
-# Bloquea contenido de odio, acoso o sexualmente explícito.
 safety_settings = [
     types.SafetySetting(
         category=HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -60,24 +58,23 @@ safety_settings = [
     ),
 ]
 
-# 2. System Prompt: Definición de rol y límites pedagógicos
+# 2. System Prompt Base
 SYSTEM_INSTRUCTION = """
-Eres "Tilin", un asistente de inteligencia artificial diseñado para ayudar a niños a estudiar.
-IMPORTANTE: NO eres un humano, ni un amigo real, ni un profesor; eres una herramienta digital de apoyo.
+Eres "Genio", un asistente de inteligencia artificial educativo para niños.
+NO eres humano. Eres una herramienta digital segura y amable.
 
-Tus Principios Rectores:
-1. SEGURIDAD Y SALUD: Jamás toleres bullying, violencia o autolesiones. PROHIBIDO hablar, mencionar o dar ejemplos sobre ALCOHOL, DROGAS o sustancias ilícitas bajo ninguna circunstancia. Además de temas sexuales más allá de libros de biología o consultas básicas sobre funcionamiento.
-2. NO REEMPLAZO: Si el niño parece frustrado, triste o el tema es muy complejo, sugiérele amablemente pedir ayuda a sus padres o profesores reales.
-3. FOMENTO DEL PENSAMIENTO: Tu objetivo es que el niño piense. Nunca hagas la tarea completa por él; guíalo. En caso de que se complique mucho, ve resolviendo con el paso a paso.
-4. EQUIDAD: Si en los textos encuentras estereotipos o sesgos, ignóralos y responde con neutralidad e inclusión.
-5. CLARIDAD: Usa explicaciones cortas, amables y sin tecnicismos difíciles.
+Tus Principios INQUEBRANTABLES:
+1. SEGURIDAD TOTAL: Prohibido hablar de ALCOHOL, DROGAS, violencia o temas para adultos. Si te preguntan, di que no puedes hablar de eso.
+2. NO HACER LA TAREA: Tu misión es que el niño aprenda, no darle la respuesta fácil.
+3. DETECTAR FRUSTRACIÓN: Si el niño no entiende tras varios intentos o parece molesto, anímalo y sugiérele preguntar a un profesor.
+4. FILTRO DE SESGOS: Ignora cualquier estereotipo de género o raza en la información que proceses.
+5. TONO: Usa lenguaje simple, motivador y claro.
 """
-
 
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
-    temperature=0.5,        # Menor temperatura para evitar alucinaciones
-    max_output_tokens=700,  # Respuestas más cortas para evitar sobreestimulación
+    temperature=0.5,
+    max_output_tokens=700,
     safety_settings=safety_settings
 )
 
@@ -109,7 +106,7 @@ def load_rag_database():
 if 'vector_db' not in st.session_state:
     st.session_state.vector_db = load_rag_database()
 
-# --- FUNCIONES DE APRENDIZAJE EN VIVO ---
+# --- FUNCIONES RAG ---
 def process_new_file(uploaded_file):
     try:
         file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
@@ -131,7 +128,6 @@ def process_new_file(uploaded_file):
     except Exception as e:
         return False, str(e)
 
-# --- FUNCIONES EXTRA ---
 def get_rag_sources():
     if not st.session_state.vector_db: return []
     try:
@@ -141,35 +137,34 @@ def get_rag_sources():
         return list(unique)
     except: return []
 
-# --- LÓGICA DE RESPUESTA INTELIGENTE Y ÉTICA ---
+# --- LÓGICA DE RESPUESTA MEJORADA (MANEJO DE FRUSTRACIÓN) ---
 def generate_response(prompt, mode):
     contexto_rag = ""
     instruccion_modo = ""
     usar_rag = True
 
-    # 1. Configuración del MODO (Diferenciación estricta)
-    if mode == "Enseñar (Socrático)":
+    # 1. Configuración de MODOS
+    if mode == "Modo Aprendizaje": 
         instruccion_modo = """
-        MODO SOCRÁTICO PURO:
-        - TU OBJETIVO: Que el niño llegue solo a la respuesta.
-        - RESTRICCIÓN: NO expliques el tema todavía.
-        - ACCIÓN: Responde ÚNICAMENTE con una pregunta que le haga reflexionar sobre su error o sobre el siguiente paso lógico.
-        - Ejemplo: Si pregunta "¿Cuánto es 5x5?", tú respondes: "¿Recuerdas qué significa multiplicar? ¿Qué pasa si sumas 5 veces el número 5?".
+        MODO APRENDIZAJE (EXPLICATIVO):
+        - OBJETIVO: Enseñar la teoría y el procedimiento.
+        - ACCIÓN: Explica paso a paso CÓMO se resuelve el problema.
+        - RESTRICCIÓN: NO des la respuesta final numérica o exacta.
+        - FRUSTRACIÓN: Si el alumno parece frustrado, sé empático y paciente.
         """
-    elif mode == "Guía Estructurada": 
+    elif mode == "Modo Prueba": 
         instruccion_modo = """
-        MODO PROFESOR EXPLICATIVO:
-        - TU OBJETIVO: Que el niño entienda el PROCEDIMIENTO o la TEORÍA.
-        - ACCIÓN: Explica paso a paso la lógica para resolver este tipo de problemas.
-        - RESTRICCIÓN: NO des la solución final (el número o palabra exacta).
-        - Ejemplo: Si pregunta "¿Cuánto es 5x5?", tú respondes: "La multiplicación es una suma repetida. Para resolver 5x5, debes sumar el número 5 un total de cinco veces. Intenta hacer esa suma paso a paso.".
+        MODO PRUEBA (SOLO PREGUNTAS):
+        - OBJETIVO: Evaluar conocimientos.
+        - ACCIÓN: Responde ÚNICAMENTE con preguntas guía o pistas breves.
+        - RESTRICCIÓN: NO expliques la lección completa. NO des respuestas.
         """
     elif mode == "Conocimiento General":
         instruccion_modo = """
         MODO ASISTENTE GENERAL:
-        - Responde usando conocimiento general verificado. Y explicando los porqués o paso a paso según el caso.
-        - Asegúrate de que el tono sea apto para niños.
-        - Si el tema toca alcohol o drogas, niégate a responder y cambia de tema amablemente.
+        - Responde dudas generales con datos verificados.
+        - Mantén tono adecuado para niños.
+        - CERO TOLERANCIA: No hables de alcohol ni drogas.
         """
         usar_rag = False 
 
@@ -180,90 +175,103 @@ def generate_response(prompt, mode):
             contexto_rag = "\n\n".join([doc.page_content for doc in docs])
         except: pass
 
-    # 3. Construcción del Prompt con FILTRO DE SESGOS Y TEMAS PROHIBIDOS
-    if usar_rag:
-        prompt_ctx = f"""
-        {instruccion_modo}
-        
-        INSTRUCCIÓN DE SEGURIDAD ADICIONAL: Si el contexto o la pregunta menciona alcohol, drogas o vicios, IGNÓRALO y di que no puedes hablar de eso.
-        INSTRUCCIÓN DE EQUIDAD: Si el siguiente contexto contiene estereotipos, ignóralos.
-        
-        CONTEXTO DE LOS LIBROS:
-        ---
-        {contexto_rag}
-        ---
-        
-        PREGUNTA DEL ESTUDIANTE: {prompt}
-        """
-    else:
-        prompt_ctx = f"""
-        {instruccion_modo}
-        
-        INSTRUCCIÓN DE SEGURIDAD: Si la pregunta menciona alcohol o drogas, responde: "Lo siento, no hablo sobre esos temas. ¿Podemos estudiar otra cosa?".
-        
-        PREGUNTA DEL ESTUDIANTE: {prompt}
-        """
+    # 3. Prompt Final con Salvaguardas
+    base_prompt = f"""
+    {instruccion_modo}
+    
+    INSTRUCCIONES CRÍTICAS DE SEGURIDAD:
+    1. ALCOHOL/DROGAS: Si se menciona, responde cortante: "No puedo hablar de eso".
+    2. DETECCIÓN DE FRUSTRACIÓN: Si el alumno dice palabras de enojo, odio o autodesprecio ("soy tonto", "odio esto"):
+       - NO des un error.
+       - Responde: "¡Tranquilo! Es normal frustrarse. Respiremos profundo e intentémoslo de nuevo paso a paso. O si prefieres, pregúntale a tu profe."
+    3. EQUIDAD: Ignora estereotipos en el contexto.
+    
+    CONTEXTO DE LIBROS (Si aplica):
+    ---
+    {contexto_rag}
+    ---
+    
+    ALUMNO: {prompt}
+    """
 
     try:
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
-        return st.session_state.chat_session.send_message(prompt_ctx).text
-    except Exception as e: return f"Lo siento, no puedo responder a eso. (Error: {e})"
+        
+        # Enviamos mensaje
+        response = st.session_state.chat_session.send_message(base_prompt)
+        
+        # MANEJO DE BLOQUEO DE SEGURIDAD (RESPUESTA VACÍA)
+        # Si Gemini bloquea la respuesta por "Hate Speech" (frustración del niño), devolvemos contención.
+        if not response.text:
+             return "🛡️ Veo que estás un poco molesto o usaste palabras fuertes. ¡Tranquilo! A veces estudiar cansa. Respira profundo e intenta preguntarme de otra forma más amable. 🦉"
+        
+        return response.text
 
+    except Exception as e:
+        # MANEJO DE EXCEPCIONES DE SEGURIDAD (API ERROR)
+        error_str = str(e).lower()
+        if "finish_reason" in error_str or "safety" in error_str or "blocked" in error_str:
+            return "🛡️ Ups, parece que algo en tu mensaje activó mis filtros de seguridad. Recuerda ser amable y evitar temas peligrosos. ¿Intentamos con otra pregunta?"
+        
+        return f"Error técnico: {e}"
 
-# --- INTERFAZ DE USUARIO ---
-
-# --- BARRA LATERAL (CONTROLES) ---
+# --- INTERFAZ ---
 with st.sidebar:
     st.header("🎛️ Configuración")
 
-    # SELECTOR DE MODO ACTUALIZADO
+    # SELECTOR DE MODO (Aprendizaje por defecto)
     modo_seleccionado = st.radio(
-        "Elige tu modo de estudio:",
-        ["Enseñar (Socrático)", "Guía Estructurada", "Conocimiento General"],
-        captions=["Te hace pensar con preguntas.", "Te explica el proceso (sin dar la respuesta final).", "Ayuda general sin usar tus libros."]
+        "Elige tu modo:",
+        ["Modo Aprendizaje", "Modo Prueba", "Conocimiento General"],
+        index=0, 
+        captions=[
+            "Te explico la materia y los pasos (sin darte la respuesta).", 
+            "Solo te doy pistas y preguntas, como en un examen.", 
+            "Ayuda general sin usar tus libros."
+        ]
     )
 
     st.divider()
 
     st.header("📂 Biblioteca")
-    st.subheader("Subir nuevo conocimiento")
-    uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
+    st.subheader("Subir material")
+    uploaded_files = st.file_uploader("Cargar PDF", type=["pdf"], accept_multiple_files=True)
 
     if uploaded_files:
         for up_file in uploaded_files:
             if up_file.name not in [os.path.basename(s) for s in get_rag_sources()]:
-                with st.spinner(f"Aprendiendo {up_file.name}..."):
+                with st.spinner(f"Leyendo {up_file.name}..."):
                     success, info = process_new_file(up_file)
-                    if success:
-                        st.toast(f"✅ {up_file.name} aprendido", icon="🧠")
-                    else:
-                        st.error(f"Error: {info}")
+                    if success: st.toast(f"✅ {up_file.name} listo", icon="🧠")
+                    else: st.error(f"Error: {info}")
 
     st.divider()
     if st.session_state.vector_db:
-        st.success(f"✅ Memoria RAG Activa")
-        with st.expander("Ver libros indexados"):
+        with st.expander("Ver libros activos"):
             for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
     else:
-        st.warning("⚠️ RAG Inactivo (No hay PDFs)")
+        st.warning("⚠️ Sin libros cargados")
 
-# --- ÁREA PRINCIPAL ---
-st.title("🦉 Tilines Inc: IA para estudio")
+# --- CHAT ---
+st.title("🦉 Tilines Inc: IA Educativa")
 
-# Mensaje de bienvenida
+# Mensaje Inicial Orientativo
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Soy Tilin. Una herramienta de estudio, escoge el modo en que prefieres estudiar y empecemos a aprender juntos. 📚"}]
+    st.session_state.messages = [{
+        "role": "assistant", 
+        "content": "¡Hola! Soy Genio. Estoy en **Modo Aprendizaje** para explicarte la materia paso a paso. Si quieres evaluarte, cambia al **Modo Prueba**. Recuerda que estoy aquí para ayudarte, ¡no te rindas! 🦉"
+    }]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Escribe tu pregunta..."):
+if prompt := st.chat_input("Escribe tu duda aquí..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    with st.spinner('Pensando...'):
+    with st.spinner('Procesando...'):
         response_text = generate_response(prompt, modo_seleccionado)
 
     with st.chat_message("assistant"):
