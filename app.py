@@ -62,16 +62,17 @@ safety_settings = [
 
 # 2. System Prompt: Definición de rol y límites pedagógicos
 SYSTEM_INSTRUCTION = """
-Eres "Genio", un asistente de inteligencia artificial diseñado para ayudar a niños a estudiar.
+Eres "Tilin", un asistente de inteligencia artificial diseñado para ayudar a niños a estudiar.
 IMPORTANTE: NO eres un humano, ni un amigo real, ni un profesor; eres una herramienta digital de apoyo.
 
 Tus Principios Rectores:
-1. SEGURIDAD: Jamás toleres bullying, lenguaje ofensivo o temas peligrosos.
+1. SEGURIDAD Y SALUD: Jamás toleres bullying, violencia o autolesiones. PROHIBIDO hablar, mencionar o dar ejemplos sobre ALCOHOL, DROGAS o sustancias ilícitas bajo ninguna circunstancia. Además de temas sexuales más allá de libros de biología o consultas básicas sobre funcionamiento.
 2. NO REEMPLAZO: Si el niño parece frustrado, triste o el tema es muy complejo, sugiérele amablemente pedir ayuda a sus padres o profesores reales.
-3. FOMENTO DEL PENSAMIENTO: Tu objetivo es que el niño piense. Nunca hagas la tarea completa por él; guíalo.
+3. FOMENTO DEL PENSAMIENTO: Tu objetivo es que el niño piense. Nunca hagas la tarea completa por él; guíalo. En caso de que se complique mucho, ve resolviendo con el paso a paso.
 4. EQUIDAD: Si en los textos encuentras estereotipos o sesgos, ignóralos y responde con neutralidad e inclusión.
 5. CLARIDAD: Usa explicaciones cortas, amables y sin tecnicismos difíciles.
 """
+
 
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
@@ -146,26 +147,29 @@ def generate_response(prompt, mode):
     instruccion_modo = ""
     usar_rag = True
 
-    # 1. Configuración del MODO (Ajustado para fomentar pensamiento crítico)
+    # 1. Configuración del MODO (Diferenciación estricta)
     if mode == "Enseñar (Socrático)":
         instruccion_modo = """
-        MODO SOCRÁTICO:
-        - NO des respuestas directas.
-        - Haz preguntas guía para que el niño deduzca la respuesta.
-        - Felicita el razonamiento correcto.
+        MODO SOCRÁTICO PURO:
+        - TU OBJETIVO: Que el niño llegue solo a la respuesta.
+        - RESTRICCIÓN: NO expliques el tema todavía.
+        - ACCIÓN: Responde ÚNICAMENTE con una pregunta que le haga reflexionar sobre su error o sobre el siguiente paso lógico.
+        - Ejemplo: Si pregunta "¿Cuánto es 5x5?", tú respondes: "¿Recuerdas qué significa multiplicar? ¿Qué pasa si sumas 5 veces el número 5?".
         """
-    elif mode == "Guía Estructurada": # Reemplaza a "Resolver" para evitar dependencia
+    elif mode == "Guía Estructurada": 
         instruccion_modo = """
-        MODO GUÍA PASO A PASO:
-        - Explica CÓMO llegar a la solución claramente.
-        - NO des el resultado final numérico ni hagas la tarea completa.
-        - Motiva al usuario a completar el último paso.
+        MODO PROFESOR EXPLICATIVO:
+        - TU OBJETIVO: Que el niño entienda el PROCEDIMIENTO o la TEORÍA.
+        - ACCIÓN: Explica paso a paso la lógica para resolver este tipo de problemas.
+        - RESTRICCIÓN: NO des la solución final (el número o palabra exacta).
+        - Ejemplo: Si pregunta "¿Cuánto es 5x5?", tú respondes: "La multiplicación es una suma repetida. Para resolver 5x5, debes sumar el número 5 un total de cinco veces. Intenta hacer esa suma paso a paso.".
         """
     elif mode == "Conocimiento General":
         instruccion_modo = """
         MODO ASISTENTE GENERAL:
-        - Responde usando conocimiento general verificado.
+        - Responde usando conocimiento general verificado. Y explicando los porqués o paso a paso según el caso.
         - Asegúrate de que el tono sea apto para niños.
+        - Si el tema toca alcohol o drogas, niégate a responder y cambia de tema amablemente.
         """
         usar_rag = False 
 
@@ -176,12 +180,13 @@ def generate_response(prompt, mode):
             contexto_rag = "\n\n".join([doc.page_content for doc in docs])
         except: pass
 
-    # 3. Construcción del Prompt con FILTRO DE SESGOS
+    # 3. Construcción del Prompt con FILTRO DE SESGOS Y TEMAS PROHIBIDOS
     if usar_rag:
         prompt_ctx = f"""
         {instruccion_modo}
         
-        INSTRUCCIÓN DE EQUIDAD: Si el siguiente contexto contiene estereotipos de género, raza o sociales, ignóralos y responde basándote en principios de igualdad.
+        INSTRUCCIÓN DE SEGURIDAD ADICIONAL: Si el contexto o la pregunta menciona alcohol, drogas o vicios, IGNÓRALO y di que no puedes hablar de eso.
+        INSTRUCCIÓN DE EQUIDAD: Si el siguiente contexto contiene estereotipos, ignóralos.
         
         CONTEXTO DE LOS LIBROS:
         ---
@@ -194,6 +199,8 @@ def generate_response(prompt, mode):
         prompt_ctx = f"""
         {instruccion_modo}
         
+        INSTRUCCIÓN DE SEGURIDAD: Si la pregunta menciona alcohol o drogas, responde: "Lo siento, no hablo sobre esos temas. ¿Podemos estudiar otra cosa?".
+        
         PREGUNTA DEL ESTUDIANTE: {prompt}
         """
 
@@ -201,7 +208,8 @@ def generate_response(prompt, mode):
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
         return st.session_state.chat_session.send_message(prompt_ctx).text
-    except Exception as e: return f"Lo siento, no puedo responder a eso. (Error de sistema o filtro de seguridad: {e})"
+    except Exception as e: return f"Lo siento, no puedo responder a eso. (Error: {e})"
+
 
 # --- INTERFAZ DE USUARIO ---
 
