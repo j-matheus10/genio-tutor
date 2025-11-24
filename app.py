@@ -253,7 +253,7 @@ st.title("🦉 Tilines Inc: IA para estudio")
 
 # Mensaje de bienvenida
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Soy Genio. Configura el modo en la izquierda y empecemos a aprender juntos. 📚"}]
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Soy Tilin. Una herramienta de estudio, escoge el modo en que prefieres estudiar y empecemos a aprender juntos. 📚"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
