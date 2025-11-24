@@ -9,7 +9,7 @@ import streamlit as st
 import zipfile
 from google import genai
 from google.genai import types
-# --- IMPORTS DE SEGURIDAD ---
+# --- IMPORT DE SEGURIDAD ---
 from google.genai.types import HarmCategory, HarmBlockThreshold
 
 # --- IMPORTS DE LANGCHAIN ---
@@ -18,7 +18,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN DE PÁGINA (Debe ir al inicio) ---
 st.set_page_config(page_title="Tilines Inc.", page_icon="🦉", layout="wide")
 
 # --- CONFIGURACIÓN GENERAL ---
@@ -28,6 +28,7 @@ ZIP_PATH = "genio_db_knowledge.zip"
 PDF_FOLDER = "pdfs"             
 EMBEDDING_MODEL_NAME = "text-embedding-004"
 
+# Asegurar que exista la carpeta de PDFs
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
 # --- DESCOMPRESIÓN AUTOMÁTICA ---
@@ -36,7 +37,7 @@ if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
     with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(DB_PATH)
 
-# --- CONFIGURACIÓN DE SEGURIDAD Y PERSONALIDAD ---
+# --- CONFIGURACIÓN DE SEGURIDAD Y PERSONALIDAD (FILTROS ÉTICOS) ---
 
 # 1. Filtros de Seguridad Estrictos (Protección Infantil)
 safety_settings = [
@@ -58,23 +59,23 @@ safety_settings = [
     ),
 ]
 
-# 2. System Prompt Base
+# 2. System Prompt: Definición de rol y límites pedagógicos
 SYSTEM_INSTRUCTION = """
-Eres "Genio", un asistente de inteligencia artificial educativo para niños.
-NO eres humano. Eres una herramienta digital segura y amable.
+Eres "Genio", un asistente de inteligencia artificial diseñado para ayudar a niños a estudiar.
+IMPORTANTE: NO eres un humano, ni un amigo real, ni un profesor; eres una herramienta digital de apoyo.
 
-Tus Principios INQUEBRANTABLES:
-1. SEGURIDAD TOTAL: Prohibido hablar de ALCOHOL, DROGAS, violencia o temas para adultos. Si te preguntan, di que no puedes hablar de eso.
-2. NO HACER LA TAREA: Tu misión es que el niño aprenda, no darle la respuesta fácil.
-3. DETECTAR FRUSTRACIÓN: Si el niño no entiende tras varios intentos o parece molesto, anímalo y sugiérele preguntar a un profesor.
-4. FILTRO DE SESGOS: Ignora cualquier estereotipo de género o raza en la información que proceses.
-5. TONO: Usa lenguaje simple, motivador y claro.
+Tus Principios Rectores:
+1. SEGURIDAD Y SALUD: Jamás toleres bullying, violencia o autolesiones. PROHIBIDO hablar, mencionar o dar ejemplos sobre ALCOHOL, DROGAS o sustancias ilícitas bajo ninguna circunstancia.
+2. NO REEMPLAZO: Si el niño parece frustrado, triste o el tema es muy complejo, sugiérele amablemente pedir ayuda a sus padres o profesores reales.
+3. FOMENTO DEL PENSAMIENTO: Tu objetivo es que el niño piense. Nunca hagas la tarea completa por él; guíalo.
+4. EQUIDAD: Si en los textos encuentras estereotipos o sesgos, ignóralos y responde con neutralidad e inclusión.
+5. CLARIDAD: Usa explicaciones cortas, amables y sin tecnicismos difíciles.
 """
 
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
-    temperature=0.5,
-    max_output_tokens=700,
+    temperature=0.5,        # Menor temperatura para evitar alucinaciones
+    max_output_tokens=700,  # Respuestas más cortas para evitar sobreestimulación
     safety_settings=safety_settings
 )
 
@@ -106,7 +107,7 @@ def load_rag_database():
 if 'vector_db' not in st.session_state:
     st.session_state.vector_db = load_rag_database()
 
-# --- FUNCIONES RAG ---
+# --- FUNCIONES DE APRENDIZAJE EN VIVO ---
 def process_new_file(uploaded_file):
     try:
         file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
@@ -128,6 +129,7 @@ def process_new_file(uploaded_file):
     except Exception as e:
         return False, str(e)
 
+# --- FUNCIONES EXTRA ---
 def get_rag_sources():
     if not st.session_state.vector_db: return []
     try:
@@ -137,34 +139,38 @@ def get_rag_sources():
         return list(unique)
     except: return []
 
-# --- LÓGICA DE RESPUESTA MEJORADA (MANEJO DE FRUSTRACIÓN) ---
+# --- LÓGICA DE RESPUESTA INTELIGENTE Y ÉTICA ---
 def generate_response(prompt, mode):
     contexto_rag = ""
     instruccion_modo = ""
     usar_rag = True
+    
+    # Mensaje predeterminado de seguridad
+    MSG_SEGURIDAD = "🛡️ Detecto que estás frustrado o preguntando sobre temas delicados (como alcohol o drogas). Lo mejor es que hables con un adulto de confianza (tus padres o profesores) sobre esto. Ellos sabrán ayudarte mejor que yo."
 
-    # 1. Configuración de MODOS
-    if mode == "Modo Aprendizaje": 
+    # 1. Configuración del MODO (Nuevos Nombres)
+    if mode == "Modo Aprendizaje": # Antes Guía Estructurada
         instruccion_modo = """
         MODO APRENDIZAJE (EXPLICATIVO):
-        - OBJETIVO: Enseñar la teoría y el procedimiento.
-        - ACCIÓN: Explica paso a paso CÓMO se resuelve el problema.
-        - RESTRICCIÓN: NO des la respuesta final numérica o exacta.
-        - FRUSTRACIÓN: Si el alumno parece frustrado, sé empático y paciente.
+        - TU OBJETIVO: Que el niño entienda el PROCEDIMIENTO o la TEORÍA.
+        - ACCIÓN: Explica paso a paso la lógica para resolver este tipo de problemas.
+        - RESTRICCIÓN: NO des la solución final (el número o palabra exacta).
+        - Ejemplo: Si pregunta "¿Cuánto es 5x5?", tú respondes: "La multiplicación es una suma repetida. Intenta sumar el 5 cinco veces.".
         """
-    elif mode == "Modo Prueba": 
+    elif mode == "Modo Prueba": # Antes Socrático
         instruccion_modo = """
         MODO PRUEBA (SOLO PREGUNTAS):
-        - OBJETIVO: Evaluar conocimientos.
-        - ACCIÓN: Responde ÚNICAMENTE con preguntas guía o pistas breves.
-        - RESTRICCIÓN: NO expliques la lección completa. NO des respuestas.
+        - TU OBJETIVO: Que el niño llegue solo a la respuesta.
+        - RESTRICCIÓN: NO expliques el tema todavía.
+        - ACCIÓN: Responde ÚNICAMENTE con una pregunta que le haga reflexionar.
+        - Ejemplo: "¿Recuerdas qué significa multiplicar?".
         """
     elif mode == "Conocimiento General":
         instruccion_modo = """
         MODO ASISTENTE GENERAL:
-        - Responde dudas generales con datos verificados.
-        - Mantén tono adecuado para niños.
-        - CERO TOLERANCIA: No hables de alcohol ni drogas.
+        - Responde usando conocimiento general verificado.
+        - Asegúrate de que el tono sea apto para niños.
+        - Si el tema toca alcohol o drogas, niégate a responder.
         """
         usar_rag = False 
 
@@ -175,59 +181,57 @@ def generate_response(prompt, mode):
             contexto_rag = "\n\n".join([doc.page_content for doc in docs])
         except: pass
 
-    # 3. Prompt Final con Salvaguardas
-    base_prompt = f"""
+    # 3. Construcción del Prompt
+    prompt_ctx = f"""
     {instruccion_modo}
     
     INSTRUCCIONES CRÍTICAS DE SEGURIDAD:
-    1. ALCOHOL/DROGAS: Si se menciona, responde cortante: "No puedo hablar de eso".
-    2. DETECCIÓN DE FRUSTRACIÓN: Si el alumno dice palabras de enojo, odio o autodesprecio ("soy tonto", "odio esto"):
-       - NO des un error.
-       - Responde: "¡Tranquilo! Es normal frustrarse. Respiremos profundo e intentémoslo de nuevo paso a paso. O si prefieres, pregúntale a tu profe."
-    3. EQUIDAD: Ignora estereotipos en el contexto.
+    1. ALCOHOL/DROGAS: Si se menciona, responde EXACTAMENTE que debe hablar con un adulto.
+    2. FRUSTRACIÓN: Si el alumno parece enojado u odia el estudio, responde que debe hablar con un adulto.
+    3. EQUIDAD: Ignora estereotipos.
     
-    CONTEXTO DE LIBROS (Si aplica):
+    CONTEXTO (Si aplica):
     ---
-    {contexto_rag}
+    {contexto_rag if usar_rag else "Sin contexto de libros."}
     ---
     
-    ALUMNO: {prompt}
+    PREGUNTA DEL ESTUDIANTE: {prompt}
     """
 
     try:
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
         
-        # Enviamos mensaje
-        response = st.session_state.chat_session.send_message(base_prompt)
+        response = st.session_state.chat_session.send_message(prompt_ctx)
         
-        # MANEJO DE BLOQUEO DE SEGURIDAD (RESPUESTA VACÍA)
-        # Si Gemini bloquea la respuesta por "Hate Speech" (frustración del niño), devolvemos contención.
+        # SI LA RESPUESTA VIENE VACÍA (BLOQUEO DE SEGURIDAD DE GEMINI)
         if not response.text:
-             return "🛡️ Veo que estás un poco molesto o usaste palabras fuertes. ¡Tranquilo! A veces estudiar cansa. Respira profundo e intenta preguntarme de otra forma más amable. 🦉"
-        
+            return MSG_SEGURIDAD
+            
         return response.text
 
     except Exception as e:
-        # MANEJO DE EXCEPCIONES DE SEGURIDAD (API ERROR)
-        error_str = str(e).lower()
-        if "finish_reason" in error_str or "safety" in error_str or "blocked" in error_str:
-            return "🛡️ Ups, parece que algo en tu mensaje activó mis filtros de seguridad. Recuerda ser amable y evitar temas peligrosos. ¿Intentamos con otra pregunta?"
-        
+        # SI OCURRE UN ERROR DE SEGURIDAD (API SAFETY BLOCK)
+        error_msg = str(e).lower()
+        if "safety" in error_msg or "blocked" in error_msg or "finish_reason" in error_msg:
+            return MSG_SEGURIDAD
         return f"Error técnico: {e}"
 
-# --- INTERFAZ ---
+
+# --- INTERFAZ DE USUARIO ---
+
+# --- BARRA LATERAL (CONTROLES) ---
 with st.sidebar:
     st.header("🎛️ Configuración")
 
-    # SELECTOR DE MODO (Aprendizaje por defecto)
+    # SELECTOR DE MODO (ORDEN CAMBIADO Y NOMBRES ACTUALIZADOS)
     modo_seleccionado = st.radio(
-        "Elige tu modo:",
+        "Elige tu modo de estudio:",
         ["Modo Aprendizaje", "Modo Prueba", "Conocimiento General"],
-        index=0, 
+        index=0, # Inicia en Modo Aprendizaje
         captions=[
-            "Te explico la materia y los pasos (sin darte la respuesta).", 
-            "Solo te doy pistas y preguntas, como en un examen.", 
+            "Te explica el proceso paso a paso (sin dar la respuesta final).",
+            "Solo te da pistas y preguntas (como un examen).",
             "Ayuda general sin usar tus libros."
         ]
     )
@@ -235,43 +239,46 @@ with st.sidebar:
     st.divider()
 
     st.header("📂 Biblioteca")
-    st.subheader("Subir material")
-    uploaded_files = st.file_uploader("Cargar PDF", type=["pdf"], accept_multiple_files=True)
+    st.subheader("Subir nuevo conocimiento")
+    uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
 
     if uploaded_files:
         for up_file in uploaded_files:
             if up_file.name not in [os.path.basename(s) for s in get_rag_sources()]:
-                with st.spinner(f"Leyendo {up_file.name}..."):
+                with st.spinner(f"Aprendiendo {up_file.name}..."):
                     success, info = process_new_file(up_file)
-                    if success: st.toast(f"✅ {up_file.name} listo", icon="🧠")
-                    else: st.error(f"Error: {info}")
+                    if success:
+                        st.toast(f"✅ {up_file.name} aprendido", icon="🧠")
+                    else:
+                        st.error(f"Error: {info}")
 
     st.divider()
     if st.session_state.vector_db:
-        with st.expander("Ver libros activos"):
+        st.success(f"✅ Memoria RAG Activa")
+        with st.expander("Ver libros indexados"):
             for s in get_rag_sources(): st.markdown(f"- 📄 `{s}`")
     else:
-        st.warning("⚠️ Sin libros cargados")
+        st.warning("⚠️ RAG Inactivo (No hay PDFs)")
 
-# --- CHAT ---
-st.title("🦉 Tilines Inc: IA Educativa")
+# --- ÁREA PRINCIPAL ---
+st.title("🦉 Tilines Inc: IA para estudio")
 
-# Mensaje Inicial Orientativo
+# Mensaje de bienvenida (PROMPT INICIAL ACTUALIZADO)
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant", 
-        "content": "¡Hola! Soy Genio. Estoy en **Modo Aprendizaje** para explicarte la materia paso a paso. Si quieres evaluarte, cambia al **Modo Prueba**. Recuerda que estoy aquí para ayudarte, ¡no te rindas! 🦉"
+        "content": "¡Hola! Soy **Genio**. Soy una herramienta digital para ayudarte a estudiar. Estoy en **Modo Aprendizaje** para explicarte las cosas paso a paso. Si prefieres evaluarte, cambia al Modo Prueba. 📚"
     }]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Escribe tu duda aquí..."):
+if prompt := st.chat_input("Escribe tu pregunta..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    with st.spinner('Procesando...'):
+    with st.spinner('Pensando...'):
         response_text = generate_response(prompt, modo_seleccionado)
 
     with st.chat_message("assistant"):
