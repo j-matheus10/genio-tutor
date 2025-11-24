@@ -9,6 +9,8 @@ import streamlit as st
 import zipfile
 from google import genai
 from google.genai import types
+# --- NUEVO IMPORT DE SEGURIDAD ---
+from google.genai.types import HarmCategory, HarmBlockThreshold
 
 # --- IMPORTS DE LANGCHAIN ---
 from langchain_community.vectorstores import Chroma
@@ -16,7 +18,10 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN DE PÁGINA (Debe ir al inicio) ---
+st.set_page_config(page_title="Tilines Inc.", page_icon="🦉", layout="wide")
+
+# --- CONFIGURACIÓN GENERAL ---
 MODELO = "gemini-2.5-flash" 
 DB_PATH = "genio_db_knowledge"  
 ZIP_PATH = "genio_db_knowledge.zip"
@@ -32,18 +37,47 @@ if not os.path.exists(DB_PATH) and os.path.exists(ZIP_PATH):
     with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(DB_PATH)
 
-# --- PERSONALIDAD BASE ---
-# La personalidad específica ahora se inyecta dinámicamente según el botón seleccionado
+# --- CONFIGURACIÓN DE SEGURIDAD Y PERSONALIDAD (FILTROS ÉTICOS) ---
+
+# 1. Filtros de Seguridad Estrictos (Protección Infantil)
+# Bloquea contenido de odio, acoso o sexualmente explícito.
+safety_settings = [
+    types.SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    ),
+    types.SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    ),
+    types.SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    ),
+    types.SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+    ),
+]
+
+# 2. System Prompt: Definición de rol y límites pedagógicos
 SYSTEM_INSTRUCTION = """
-Eres "Genio", un tutor inteligente y adaptable.
-Tu comportamiento cambiará según la instrucción de modo que recibas en cada mensaje.
-Siempre mantén un tono amable, paciente y educativo.
-Usa **negritas** para resaltar conceptos clave.
+Eres "Genio", un asistente de inteligencia artificial diseñado para ayudar a niños a estudiar.
+IMPORTANTE: NO eres un humano, ni un amigo real, ni un profesor; eres una herramienta digital de apoyo.
+
+Tus Principios Rectores:
+1. SEGURIDAD: Jamás toleres bullying, lenguaje ofensivo o temas peligrosos.
+2. NO REEMPLAZO: Si el niño parece frustrado, triste o el tema es muy complejo, sugiérele amablemente pedir ayuda a sus padres o profesores reales.
+3. FOMENTO DEL PENSAMIENTO: Tu objetivo es que el niño piense. Nunca hagas la tarea completa por él; guíalo.
+4. EQUIDAD: Si en los textos encuentras estereotipos o sesgos, ignóralos y responde con neutralidad e inclusión.
+5. CLARIDAD: Usa explicaciones cortas, amables y sin tecnicismos difíciles.
 """
+
 chat_config = types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
-    temperature=0.7,
-    max_output_tokens=1000
+    temperature=0.5,        # Menor temperatura para evitar alucinaciones
+    max_output_tokens=700,  # Respuestas más cortas para evitar sobreestimulación
+    safety_settings=safety_settings
 )
 
 # --- INICIALIZACIÓN ---
@@ -80,12 +114,12 @@ def process_new_file(uploaded_file):
         file_path = os.path.join(PDF_FOLDER, uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-            
+
         loader = PyPDFLoader(file_path)
         documents = loader.load()
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         texts = text_splitter.split_documents(documents)
-        
+
         if st.session_state.vector_db is None:
             st.session_state.vector_db = Chroma.from_documents(
                 texts, embedding_function, persist_directory=DB_PATH
@@ -106,74 +140,88 @@ def get_rag_sources():
         return list(unique)
     except: return []
 
-# --- LÓGICA DE RESPUESTA INTELIGENTE ---
+# --- LÓGICA DE RESPUESTA INTELIGENTE Y ÉTICA ---
 def generate_response(prompt, mode):
     contexto_rag = ""
     instruccion_modo = ""
     usar_rag = True
 
-    # 1. Configurar el MODO
+    # 1. Configuración del MODO (Ajustado para fomentar pensamiento crítico)
     if mode == "Enseñar (Socrático)":
-        instruccion_modo = "ACTÚA EN MODO ENSEÑAR: NO des la respuesta directa. Usa el método socrático, haz preguntas guía y da pistas para que el usuario aprenda."
-    elif mode == "Resolver (Directo)":
-        instruccion_modo = "ACTÚA EN MODO RESOLVER: Da la respuesta directa, clara y concisa. Explica paso a paso si es necesario."
+        instruccion_modo = """
+        MODO SOCRÁTICO:
+        - NO des respuestas directas.
+        - Haz preguntas guía para que el niño deduzca la respuesta.
+        - Felicita el razonamiento correcto.
+        """
+    elif mode == "Guía Estructurada": # Reemplaza a "Resolver" para evitar dependencia
+        instruccion_modo = """
+        MODO GUÍA PASO A PASO:
+        - Explica CÓMO llegar a la solución claramente.
+        - NO des el resultado final numérico ni hagas la tarea completa.
+        - Motiva al usuario a completar el último paso.
+        """
     elif mode == "Conocimiento General":
-        instruccion_modo = "ACTÚA COMO ASISTENTE GENERAL: Responde usando tu conocimiento general de IA. NO uses el contexto de los documentos a menos que sea indispensable."
-        usar_rag = False # Desactivamos la búsqueda en documentos
+        instruccion_modo = """
+        MODO ASISTENTE GENERAL:
+        - Responde usando conocimiento general verificado.
+        - Asegúrate de que el tono sea apto para niños.
+        """
+        usar_rag = False 
 
-    # 2. Búsqueda RAG (Solo si no es modo general)
+    # 2. Búsqueda RAG
     if usar_rag and st.session_state.vector_db:
         try:
             docs = st.session_state.vector_db.similarity_search(prompt, k=3)
             contexto_rag = "\n\n".join([doc.page_content for doc in docs])
         except: pass
-    
-    # 3. Construcción del Prompt Final
+
+    # 3. Construcción del Prompt con FILTRO DE SESGOS
     if usar_rag:
         prompt_ctx = f"""
         {instruccion_modo}
         
-        Usa el siguiente CONTEXTO DE LOS DOCUMENTOS para responder (si es relevante):
+        INSTRUCCIÓN DE EQUIDAD: Si el siguiente contexto contiene estereotipos de género, raza o sociales, ignóralos y responde basándote en principios de igualdad.
+        
+        CONTEXTO DE LOS LIBROS:
         ---
         {contexto_rag}
         ---
         
-        PREGUNTA DEL USUARIO: {prompt}
+        PREGUNTA DEL ESTUDIANTE: {prompt}
         """
     else:
-        # Prompt limpio para conocimiento general
         prompt_ctx = f"""
         {instruccion_modo}
         
-        PREGUNTA DEL USUARIO: {prompt}
+        PREGUNTA DEL ESTUDIANTE: {prompt}
         """
 
     try:
         if 'chat_session' not in st.session_state:
             st.session_state.chat_session = client.chats.create(model=MODELO, config=chat_config)
         return st.session_state.chat_session.send_message(prompt_ctx).text
-    except Exception as e: return f"Error: {e}"
+    except Exception as e: return f"Lo siento, no puedo responder a eso. (Error de sistema o filtro de seguridad: {e})"
 
-# --- INTERFAZ ---
-st.set_page_config(page_title="Tilines Inc.", page_icon="🦉", layout="wide")
+# --- INTERFAZ DE USUARIO ---
 
 # --- BARRA LATERAL (CONTROLES) ---
 with st.sidebar:
     st.header("🎛️ Configuración")
-    
-    # SELECTOR DE MODO
+
+    # SELECTOR DE MODO ACTUALIZADO
     modo_seleccionado = st.radio(
         "Elige tu modo de estudio:",
-        ["Enseñar (Socrático)", "Resolver (Directo)", "Conocimiento General"],
-        captions=["Te guía sin dar respuestas.", "Te da la solución directa.", "Usa internet/IA (sin tus PDFs)."]
+        ["Enseñar (Socrático)", "Guía Estructurada", "Conocimiento General"],
+        captions=["Te hace pensar con preguntas.", "Te explica el proceso (sin dar la respuesta final).", "Ayuda general sin usar tus libros."]
     )
-    
+
     st.divider()
-    
+
     st.header("📂 Biblioteca")
     st.subheader("Subir nuevo conocimiento")
     uploaded_files = st.file_uploader("Añadir PDF a la sesión", type=["pdf"], accept_multiple_files=True)
-    
+
     if uploaded_files:
         for up_file in uploaded_files:
             if up_file.name not in [os.path.basename(s) for s in get_rag_sources()]:
@@ -183,7 +231,7 @@ with st.sidebar:
                         st.toast(f"✅ {up_file.name} aprendido", icon="🧠")
                     else:
                         st.error(f"Error: {info}")
-    
+
     st.divider()
     if st.session_state.vector_db:
         st.success(f"✅ Memoria RAG Activa")
@@ -195,9 +243,9 @@ with st.sidebar:
 # --- ÁREA PRINCIPAL ---
 st.title("🦉 Tilines Inc: IA para estudio")
 
-# Mensaje de bienvenida dinámico según el modo
+# Mensaje de bienvenida
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Configura el modo en que quieres trabajar en la barra lateral izquierda y empecemos cuando estés listo!📚"}]
+    st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Soy Genio. Configura el modo en la izquierda y empecemos a aprender juntos. 📚"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -208,10 +256,9 @@ if prompt := st.chat_input("Escribe tu pregunta..."):
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.spinner('Pensando...'):
-        # Pasamos el modo seleccionado a la función de respuesta
         response_text = generate_response(prompt, modo_seleccionado)
-    
+
     with st.chat_message("assistant"):
         st.markdown(response_text)
-    
+
     st.session_state.messages.append({"role": "assistant", "content": response_text})
